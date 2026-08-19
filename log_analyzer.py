@@ -1,11 +1,16 @@
 import re
 from datetime import datetime
-from http.cookiejar import user_domain_match
-
 
 def read_logs(log_file):
-    with open(log_file, "r") as file:
-        return file.readlines()
+    try:
+        with open(log_file, "r") as file:
+            return file.readlines()
+    except FileNotFoundError:
+        print(f"[ERROR] Log file not found: {log_file}")
+        return []
+    except PermissionError:
+        print(f"[ERROR] Permission denied: {log_file}")
+        return []
 
 def extract_time(log):
     time_match = re.search(r"\b(\d{2}:\d{2}:\d{2})\b", log)

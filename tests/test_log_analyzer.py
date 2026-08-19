@@ -1,4 +1,5 @@
 from log_analyzer import (
+    read_logs,
     detect_bruteforce,
     detect_success_after_failures,
     detect_multiple_users,
@@ -286,3 +287,22 @@ def test_no_bruteforce_success_when_attempts_are_too_slow():
     alerts = detect_bruteforce_success(events)
 
     assert len(alerts) == 0
+
+def test_read_logs(tmp_path):
+    log_file = tmp_path / "test.log"
+
+    log_file.write_text(
+        "Failed password for admin from 192.168.1.50\n"
+        "Accepted password for admin from 192.168.1.50\n"
+    )
+
+    logs = read_logs(log_file)
+
+    assert len(logs) == 2
+    assert "Failed password" in logs[0]
+    assert "Accepted password" in logs[1]
+
+def test_read_logs_file_not_found():
+    logs = read_logs("file_that_does_not_exist.log")
+
+    assert logs == []
