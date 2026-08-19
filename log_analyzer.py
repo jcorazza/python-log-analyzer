@@ -147,7 +147,7 @@ def detect_success_after_failures(events):
             })
     return alerts
 
-def detect_mutliple_users(events):
+def detect_multiple_users(events):
     alerts = []
 
     users_by_ip = {}
@@ -167,7 +167,7 @@ def detect_mutliple_users(events):
     for ip, users in users_by_ip.items():
         if len(users) >= 3:
             alerts.append({
-                "id": "MUTLIPLE_USERS",
+                "id": "MULTIPLE_USERS",
                 "severity": "MEDIUM",
                 "type": "multiple_users_targeted",
                 "source_ip" : ip,
@@ -176,12 +176,79 @@ def detect_mutliple_users(events):
             })
     return alerts
 
+def detect_bruteforce_success(events):
+    alerts =[]
+
+    for i, event in enumerate(events):
+        if event["type"] != "successful_login":
+            continue
+
+        failed_events = []
+
+        for previous_event in events[:i]:
+            if (
+                previous_event["type"] == "failed_login"
+                and previous_event["ip"] == event["ip"]
+                and previous_event["username"] == event["username"]
+            ):
+                failed_events.append(previous_event)
+
+        if len(failed_events) < 5:
+            continue
+
+        first_time = datetime.strptime(
+            failed_events[-5]["time"], "%H:%M:%S"
+        )
+
+        last_failed_time = datetime.strptime(
+            failed_events[-1]["time"], "%H:%M:%S"
+        )
+
+        duration = (
+            last_failed_time - first_time
+        ).total_seconds()
+
+        if duration <= 60:
+            alerts.append({
+                "id": "BRUTE_FORCE_SUCCESS",
+                "severity": "CRITICAL",
+                "type": "brute_force_success",
+                "source_ip": event["ip"],
+                "username": event["username"],
+                "failed_attempts": 5,
+                "time_window": int(duration),
+                "successful_login": event["time"]
+            })
+        return  alerts
+
 def detect_threats(events):
     alerts = []
 
-    alerts.extend(detect_bruteforce(events))
-    alerts.extend(detect_success_after_failures(events))
-    alerts.extend(detect_mutliple_users(events))
+    brute_force_success_alerts = detect_bruteforce_success(events)
+    alerts.extend(brute_force_success_alerts)
+
+    correlated_incidents = {
+        (alert["source_ip"], alert["username"])
+        for alert in brute_force_success_alerts
+    }
+
+    brute_force_alerts = detect_bruteforce(events)
+
+    for alert in brute_force_alerts:
+        incident = (alert["source_ip"], alert["username"])
+
+        if incident not in correlated_incidents:
+            alerts.append(alert)
+
+    success_alerts = detect_success_after_failures(events)
+
+    for alert in success_alerts:
+        incident = (alert["source_ip"], alert["username"])
+
+        if incident not in correlated_incidents:
+            alerts.append(alert)
+
+    alerts.extend(detect_multiple_users(events))
 
     return alerts
 
@@ -255,16 +322,23 @@ def generate_report(logs, results, alerts):
             print(f"        User count: {alert['user_count']}")
             print(f"        Users: {', '.join(alert['users'])}")
 
+        elif alert["type"] == "brute_force_success":
+            print(f"       Source IP: {alert['source_ip']}")
+            print(f"       Target user: {alert['username']}")
+            print(f"       Failed attempts: {alert['failed_attempts']}")
+            print(f"       Time window: {alert['time_window']} seconds")
+            print(f"       Successful login: {alert['successful_login']}")
+
     print("\n========================================")
 
 
+if __name__ == "__main__":
+    log_file = "sample_auth.log"
+    logs = read_logs(log_file)
+    results = analyze_log(logs)
 
-log_file = "sample_auth.log"
-logs = read_logs(log_file)
-results = analyze_log(logs)
-
-alerts = detect_threats(results["events"])
-generate_report(logs, results, alerts)
+    alerts = detect_threats(results["events"])
+    generate_report(logs, results, alerts)
 
 
 
